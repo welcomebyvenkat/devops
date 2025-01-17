@@ -1,0 +1,49 @@
+CREATE OR REPLACE FUNCTION save_me(tables_to_drop TEXT[])
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    table_name TEXT;
+    parent_table TEXT;
+    success_flag BOOLEAN := TRUE; -- Default to success
+BEGIN
+    -- Loop through each table in the input array
+    FOREACH table_name IN ARRAY tables_to_drop
+    LOOP
+        BEGIN
+            -- Extract the parent table name (e.g., A_3 -> A)
+            parent_table := split_part(table_name, '_', 1);
+            
+            -- Check if the partition exists
+            IF EXISTS (
+                SELECT 1
+                FROM pg_inherits i
+                JOIN pg_class c ON i.inhrelid = c.oid
+                JOIN pg_class p ON i.inhparent = p.oid
+                WHERE p.relname = parent_table AND c.relname = table_name
+            ) THEN
+                -- Detach the partition
+                EXECUTE format('ALTER TABLE %I DETACH PARTITION %I', parent_table, table_name);
+                RAISE NOTICE 'Partition % has been detached from parent table %.', table_name, parent_table;
+            ELSE
+                RAISE NOTICE 'Partition % does not exist in parent table %. Skipping.', table_name, parent_table;
+            END IF;
+
+            -- Drop the table
+            EXECUTE format('DROP TABLE IF EXISTS %I', table_name);
+            RAISE NOTICE 'Table % has been dropped.', table_name;
+
+        EXCEPTION
+            WHEN OTHERS THEN
+                -- Set the success flag to FALSE if any error occurs
+                success_flag := FALSE;
+                RAISE WARNING 'An error occurred while processing table %: %', table_name, SQLERRM;
+        END;
+    END LOOP;
+
+    RAISE NOTICE 'Processing complete for tables: %', array_to_string(tables_to_drop, ', ');
+
+    -- Return the success flag
+    RETURN success_flag;
+END;
+$$;
