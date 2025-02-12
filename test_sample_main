@@ -1,58 +1,38 @@
 import pytest
 from unittest.mock import patch
-from f1_refactored import f_test, SetParameters
+import sys
+from f1 import f_main_run, SetParameters
+
 
 @pytest.fixture
 def mock_config():
     return SetParameters({}, "hai", "test", "haii")
 
-def test_f_test_success(mock_config):
-    with patch("f1_refactored.f_invoke_psql_cmd", return_value=("INFO", "good")) as mock_psql, \
-         patch("f1_refactored.insert_get_obj_lvl_archv_dtls", return_value=(["tbl1"], [])) as mock_insert, \
-         patch("f1_refactored.f_call_dm_object_fill_status") as mock_status:
 
-        f_test("1\n2", mock_config, "batch_id")
+def test_f_main_run_success(mock_config):
+    test_args = ["script_name", "-r", "1", "-c", "test_config", "-s", "10"]
 
-        mock_psql.assert_called()
-        mock_insert.assert_called()
-        mock_status.assert_called()
-
-def test_f_test_failure(mock_config):
-    with patch("f1_refactored.f_invoke_psql_cmd", return_value=("INFO", "good")) as mock_psql, \
-         patch("f1_refactored.insert_get_obj_lvl_archv_dtls", return_value=([], ["error_tbl"])) as mock_insert, \
-         patch("f1_refactored.f_call_dm_object_fill_status") as mock_status:
-
-        with pytest.raises(Exception, match="Some request IDs failed"):
-            f_test("1\n2", mock_config, "batch_id")
+    with patch.object(sys, "argv", test_args), \
+            patch("f1.directories_setup_and_env_sourcing", return_value=mock_config), \
+            patch("f1.f_invoke_psql_cmd", return_value=("INFO", "good")) as mock_psql, \
+            patch("f1.f_archive_all_elg_request") as mock_archive, \
+            patch("f1.notify_success_email") as mock_notify:
+        f_main_run("batch_guid")
 
         mock_psql.assert_called()
-        mock_insert.assert_called()
-        mock_status.assert_called()
+        mock_archive.assert_called()
+        mock_notify.assert_called()
 
-def test_f_test_db_failure(mock_config):
-    with patch("f1_refactored.f_invoke_psql_cmd", side_effect=Exception("DB Error")) as mock_psql, \
-         patch("f1_refactored.f_call_dm_object_fill_status") as mock_status:
 
-        with pytest.raises(Exception, match="Some request IDs failed"):
-            f_test("1\n2", mock_config, "batch_id")
+def test_f_main_run_failure(mock_config):
+    test_args = ["script_name", "-r", "1", "-c", "test_config", "-s", "10"]
+
+    with patch.object(sys, "argv", test_args), \
+            patch("f1.directories_setup_and_env_sourcing", return_value=mock_config), \
+            patch("f1.f_invoke_psql_cmd", return_value=("ERROR", "failure")) as mock_psql, \
+            patch("f1.f_exit_on_archive_error") as mock_exit:
+        f_main_run("batch_guid")
 
         mock_psql.assert_called()
-        mock_status.assert_called()
+        mock_exit.assert_called()
 
-def test_f_test_empty_input(mock_config):
-    with patch("f1_refactored.f_call_dm_object_fill_status") as mock_status:
-        f_test("", mock_config, "batch_id")  # Should exit without error
-        mock_status.assert_not_called()
-
-
-def test_check_failed_request_ids(mock_config):
-    with patch("f1_refactored.f_invoke_psql_cmd", return_value=("INFO", "good")), \
-            patch("f1_refactored.insert_get_obj_lvl_archv_dtls", return_value=(["adf"], ["a"])), \
-            patch("f1_refactored.f_call_dm_object_fill_status"):
-        with pytest.raises(Exception, match="Some request IDs failed") as exc_info:
-            f_test("1\n2\n3", mock_config, "batch_id")
-
-        # Extract failed request IDs from exception message
-        assert "Some request IDs failed" in str(exc_info.value)
-        failed_ids = str(exc_info.value).split(":")[-1].strip()
-        assert failed_ids == "[1, 2, 3]"  # Expected failed IDs
