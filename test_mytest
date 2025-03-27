@@ -47,3 +47,60 @@ BEGIN
     RETURN success_flag;
 END;
 $$;
+
+
+**Specification for Data Processing Pipeline**
+
+### **1. Overview**
+This document outlines the specifications for processing data from a source table by extracting selected columns, applying de-identification and decompression, normalizing the data, and reapplying Data Loss Prevention (DLP) controls before storing it in a staging table.
+
+### **2. Data Extraction**
+- Extract specific columns from the source table as per the configuration.
+- Ensure the extracted data maintains its structure and integrity.
+
+### **3. Data Transformation**
+#### **3.1 Decompression & De-DLP**
+- Identify and apply the appropriate decompression mechanism (e.g., GZIP, BZ2) based on the column encoding.
+- Apply de-identification reversal (Re-identification) using Google DLP API for encrypted/masked fields.
+
+#### **3.2 Data Format Handling**
+- Some columns contain complex data structures that need appropriate parsing:
+  - **JSON String**: Parse the string to a valid JSON object.
+  - **XML String**: Convert the XML to a JSON format.
+  - **Query String**: Convert key-value pairs into a JSON format.
+  - **Nested String Data**: Handle mixed data types (JSON with embedded XML, query strings, etc.) and transform them into a structured JSON object.
+
+#### **3.3 Casting to JSON**
+- Ensure all transformed data is converted into a valid JSON format.
+- Preserve data hierarchy and relationships during conversion.
+
+### **4. Data Governance & DLP Re-application**
+- Apply granular-level DLP policies to ensure data security and compliance.
+- Use column-level masking, encryption, or tokenization as required.
+- Validate that the processed data conforms to security and privacy standards.
+
+### **5. Data Storage**
+- Store the transformed and protected data in a designated **staging table**.
+- Ensure the staging table is cleared by the downstream process after use to prevent redundant storage.
+
+### **6. Error Handling & Logging**
+- Implement logging mechanisms for tracking processing errors and exceptions.
+- Define retry strategies for failures during decompression, de-DLP, and data transformations.
+- Monitor data integrity and alert on inconsistencies.
+
+### **7. Performance Considerations**
+- Optimize the processing pipeline to handle large-scale data efficiently.
+- Parallelize decompression and de-identification operations where possible.
+- Minimize storage overhead by ensuring staging tables are periodically cleared.
+
+### **8. Security & Compliance**
+- Ensure compliance with data protection regulations (GDPR, CCPA, etc.).
+- Restrict access to sensitive data via role-based access controls.
+- Encrypt data in transit and at rest to enhance security.
+
+### **9. Future Enhancements**
+- Support additional data formats for transformation.
+- Improve efficiency by incorporating AI-based anomaly detection for data governance.
+- Automate schema evolution handling for dynamic data structures.
+
+
