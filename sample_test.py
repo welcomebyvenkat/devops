@@ -36,13 +36,8 @@ def build_payload(row: Dict[str, str]) -> Dict[str, Any]:
 
 def parse_returned_id(resp_json: Any, external_member_id: str) -> Optional[str]:
     """
-    Example response:
-    {
-      "data": {
-        "MIC004...": ["null"]
-      },
-      "success": false
-    }
+    If response format is:
+      { "data": { "<ExternalMemberID>": ["returnedId"] }, "success": true/false, ... }
     """
     try:
         if isinstance(resp_json, dict):
@@ -80,7 +75,7 @@ async def post_one(
                 body_text = await resp.text()
                 elapsed_ms = int((time.time() - t0) * 1000)
 
-                # non-2xx
+                # Non-2xx -> capture real reason
                 if not (200 <= status < 300):
                     last_error = f"HTTP {status} body={body_text[:500]}"
                     if status in (408, 429, 500, 502, 503, 504) and attempt < retries:
@@ -95,7 +90,7 @@ async def post_one(
                         "error": last_error,
                     }
 
-                # parse JSON
+                # Try parse JSON
                 try:
                     resp_json = json.loads(body_text)
                 except Exception:
@@ -104,7 +99,7 @@ async def post_one(
                 returned_id = parse_returned_id(resp_json, external_member_id)
                 success_flag = resp_json.get("success") if isinstance(resp_json, dict) else None
 
-                # if API explicitly returns success=false => failure
+                # If API explicitly says success=false treat as failure
                 if success_flag is False:
                     last_error = f"success=false body={body_text[:500]}"
                     return {
@@ -139,6 +134,7 @@ async def post_one(
                 "error": last_error,
             }
 
+    # Final safety return (never return None)
     return {
         "ok": False,
         "ExternalMemberID": external_member_id,
@@ -159,7 +155,7 @@ async def run_all(args):
         print("No rows found in input CSV.")
         return
 
-    # Output dirs
+    # Ensure output dirs exist
     os.makedirs(os.path.dirname(args.out_success) or ".", exist_ok=True)
     os.makedirs(os.path.dirname(args.out_failed) or ".", exist_ok=True)
 
@@ -171,7 +167,7 @@ async def run_all(args):
     if args.token:
         headers["Authorization"] = f"Bearer {args.token}"
 
-    # SSL handling
+    # SSL handling: --verify-false disables cert validation (TEST ONLY)
     ssl_param = False if args.verify_false else None
 
     connector = aiohttp.TCPConnector(ssl=ssl_param, limit=args.concurrency)
@@ -180,84 +176,93 @@ async def run_all(args):
     success_fields = ["ExternalMemberID", "httpStatus", "elapsed_ms", "returnedId"]
     failed_fields = ["ExternalMemberID", "httpStatus", "elapsed_ms", "error"]
 
-    sf = open(args.out_success, "w", newline="", encoding="utf-8")
-    ff = open(args.out_failed, "w", newline="", encoding="utf-8")
-    sw = csv.DictWriter(sf, fieldnames=success_fields)
-    fw = csv.DictWriter(ff, fieldnames=failed_fields)
-    sw.writeheader()
-    fw.writeheader()
+    with open(args.out_success, "w", newline="", encoding="utf-8") as sf, \
+         open(args.out_failed, "w", newline="", encoding="utf-8") as ff:
 
-    started = time.time()
-    done = okc = failc = 0
+        sw = csv.DictWriter(sf, fieldnames=success_fields)
+        fw = csv.DictWriter(ff, fieldnames=failed_fields)
+        sw.writeheader()
+        fw.writeheader()
 
-    async with aiohttp.ClientSession(connector=connector) as session:
+        started = time.time()
+        done = okc = failc = 0
 
-        async def bound_call(r):
-            async with sem:
-                return await post_one(
-                    session=session,
-                    url=args.url,
-                    headers=headers,
-                    row=r,
-                    timeout_s=args.timeout,
-                    retries=args.retries,
-                    backoff_base_s=args.backoff,
-                )
+        async with aiohttp.ClientSession(connector=connector) as session:
 
-        tasks = [asyncio.create_task(bound_call(r)) for r in rows]
+            async def bound_call(r):
+                async with sem:
+                    return await post_one(
+                        session=session,
+                        url=args.url,
+                        headers=headers,
+                        row=r,
+                        timeout_s=args.timeout,
+                        retries=args.retries,
+                        backoff_base_s=args.backoff,
+                    )
 
-        for coro in asyncio.as_completed(tasks):
-            res = await coro
-            done += 1
+            # NOTE: for very large files, this creates many tasks at once.
+            # If you run into memory issues, tell me — I'll give the batching/queue version.
+            tasks = [asyncio.create_task(bound_call(r)) for r in rows]
 
-            if res.get("ok"):
-                okc += 1
-                sw.writerow(
-                    {
+            for coro in asyncio.as_completed(tasks):
+                res = await coro
+                done += 1
+
+                if res.get("ok"):
+                    okc += 1
+                    sw.writerow({
                         "ExternalMemberID": res.get("ExternalMemberID", ""),
                         "httpStatus": res.get("httpStatus", ""),
                         "elapsed_ms": res.get("elapsed_ms", ""),
                         "returnedId": res.get("returnedId", ""),
-                    }
-                )
-            else:
-                failc += 1
-                fw.writerow(
-                    {
+                    })
+                else:
+                    failc += 1
+                    fw.writerow({
                         "ExternalMemberID": res.get("ExternalMemberID", ""),
                         "httpStatus": res.get("httpStatus", ""),
                         "elapsed_ms": res.get("elapsed_ms", ""),
                         "error": res.get("error", ""),
-                    }
-                )
+                    })
 
-            if done % 50 == 0:
-                elapsed = time.time() - started
-                rps = done / elapsed if elapsed else 0
-                print(f"Progress {done}/{len(rows)} | ok={okc} fail={failc} | {rps:.2f} req/s")
+                # ✅ Progress print with % + elapsed + ETA
+                if done % args.print_every == 0 or done == len(rows):
+                    elapsed = time.time() - started
+                    percent = (done / len(rows)) * 100
+                    rps = done / elapsed if elapsed else 0
 
-    sf.close()
-    ff.close()
+                    remaining = len(rows) - done
+                    eta_sec = remaining / rps if rps > 0 else 0
 
-    total = time.time() - started
-    print("\nDONE")
-    print(f"total={len(rows)} ok={okc} fail={failc} time={total:.1f}s")
-    print("success file:", args.out_success)
-    print("failed file :", args.out_failed)
+                    print(
+                        f"Progress: {done}/{len(rows)} "
+                        f"({percent:.1f}%) | "
+                        f"ok={okc} fail={failc} | "
+                        f"elapsed={elapsed/60:.1f} min | "
+                        f"ETA={eta_sec/60:.1f} min"
+                    )
+
+        total = time.time() - started
+        print("\nDONE")
+        print(f"total={len(rows)} ok={okc} fail={failc} time={total/60:.1f} min")
+        print("success file:", args.out_success)
+        print("failed file :", args.out_failed)
 
 
 def main():
-    p = argparse.ArgumentParser(description="Read CSV and POST concurrently")
+    p = argparse.ArgumentParser(description="Read CSV and POST concurrently (with progress + ETA)")
     p.add_argument("--input", required=True, help="Input CSV path")
     p.add_argument("--url", required=True, help="API URL")
     p.add_argument("--token", default=None, help="Bearer token (optional)")
-    p.add_argument("--concurrency", type=int, default=10, help="Concurrent requests")
-    p.add_argument("--timeout", type=int, default=60, help="Timeout per request (seconds)")
-    p.add_argument("--retries", type=int, default=2, help="Retries for transient errors")
+    p.add_argument("--concurrency", type=int, default=5, help="Concurrent requests")
+    p.add_argument("--timeout", type=int, default=120, help="Timeout per request (seconds)")
+    p.add_argument("--retries", type=int, default=1, help="Retries for transient errors")
     p.add_argument("--backoff", type=float, default=0.5, help="Backoff base seconds")
     p.add_argument("--out-success", default="success.csv", help="Success output CSV")
     p.add_argument("--out-failed", default="failed.csv", help="Failed output CSV")
     p.add_argument("--verify-false", action="store_true", help="Disable SSL verification (TEST ONLY)")
+    p.add_argument("--print-every", type=int, default=25, help="Print progress every N records")
     args = p.parse_args()
 
     asyncio.run(run_all(args))
