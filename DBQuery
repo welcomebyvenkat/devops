@@ -1,28 +1,28 @@
-SELECT load_id,
-       authorization_number,
-       line_item_number,
-       status,
-       errordescription
-FROM (
+WITH latest_rows AS (
     SELECT t.*,
            ROW_NUMBER() OVER (
-               PARTITION BY authorization_number, line_item_number
-               ORDER BY load_id DESC
-           ) AS rn
-    FROM your_table t
-    WHERE authorization_number = 'OP123'   -- 👈 your auth here
+               PARTITION BY t.source_authorization_num, t.line_item_number
+               ORDER BY t.load_id DESC
+           ) rn
+    FROM TRUCARE_STG_OWN.TRUCARE_AUTH_BULK_LOAD_HISTORY t
+    WHERE t.source_authorization_num = '147968733'
 )
-x
-WHERE rn = 1
-  AND status = 'FAILED'
+SELECT l.load_id,
+       l.source_authorization_num,
+       l.line_item_number,
+       l.status,
+       l.errordescription
+FROM latest_rows l
+WHERE l.rn = 1
+  AND UPPER(TRIM(l.status)) = 'FAILURE'
   AND NOT (
-      UPPER(NVL(errordescription, '')) = 'DUPLICATE'
+      LOWER(NVL(l.errordescription,'')) LIKE '%duplicate%'
       AND EXISTS (
           SELECT 1
-          FROM your_table y
-          WHERE y.authorization_number = x.authorization_number
-            AND y.line_item_number     = x.line_item_number
-            AND y.status               = 'SUCCESS'
+          FROM TRUCARE_STG_OWN.TRUCARE_AUTH_BULK_LOAD_HISTORY s
+          WHERE s.source_authorization_num = l.source_authorization_num
+            AND NVL(s.line_item_number, -1) = NVL(l.line_item_number, -1)
+            AND UPPER(TRIM(s.status)) = 'SUCCESS'
       )
   )
-ORDER BY line_item_number;
+ORDER BY l.line_item_number;
