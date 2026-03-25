@@ -1,0 +1,28 @@
+SELECT load_id,
+       authorization_number,
+       line_item_number,
+       status,
+       errordescription
+FROM (
+    SELECT t.*,
+           ROW_NUMBER() OVER (
+               PARTITION BY authorization_number, line_item_number
+               ORDER BY load_id DESC
+           ) AS rn
+    FROM your_table t
+    WHERE authorization_number = 'OP123'   -- 👈 your auth here
+)
+x
+WHERE rn = 1
+  AND status = 'FAILED'
+  AND NOT (
+      UPPER(NVL(errordescription, '')) = 'DUPLICATE'
+      AND EXISTS (
+          SELECT 1
+          FROM your_table y
+          WHERE y.authorization_number = x.authorization_number
+            AND y.line_item_number     = x.line_item_number
+            AND y.status               = 'SUCCESS'
+      )
+  )
+ORDER BY line_item_number;
