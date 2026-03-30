@@ -1,66 +1,77 @@
-import org.apache.commons.csv.CSVFormat;
-import org.apache.commons.csv.CSVParser;
-import org.apache.commons.csv.CSVPrinter;
-import org.apache.commons.csv.CSVRecord;
+import org.apache.commons.csv.*;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.util.HashSet;
-import java.util.Set;
+import java.util.ArrayList;
+import java.util.List;
 
-public class CsvMatcher {
+public class CsvReaderUtil {
 
-    public static void main(String[] args) throws Exception {
+    public static List<MedicaidRecord> readCsv(String filePath) throws Exception {
 
-        String file1 = "C:/input/excel1.csv";
-        String file2 = "C:/input/excel2.csv";
-        String output = "C:/output/matched.csv";
+        List<MedicaidRecord> list = new ArrayList<>();
 
-        Set<String> medicaidSet = new HashSet<>();
-
-        // Read file2
         try (
-                Reader reader2 = new InputStreamReader(new FileInputStream(file2), StandardCharsets.UTF_8);
-                CSVParser parser2 = CSVFormat.DEFAULT
+                Reader reader = new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8);
+                CSVParser parser = CSVFormat.DEFAULT
                         .builder()
-                        .setHeader()
+                        .setHeader()                 // uses first row as header
                         .setSkipHeaderRecord(true)
                         .build()
-                        .parse(reader2)
+                        .parse(reader)
         ) {
-            for (CSVRecord record : parser2) {
-                String medicaid = record.get(0);
-                if (medicaid != null && !medicaid.trim().isEmpty()) {
-                    medicaidSet.add(medicaid.trim());
-                }
+
+            for (CSVRecord record : parser) {
+
+                String medicaidId = record.get("medicaid_id");
+                String authName   = record.get("Auth name");
+                String noteText   = record.get("note text");
+
+                list.add(new MedicaidRecord(
+                        medicaidId != null ? medicaidId.trim() : "",
+                        authName != null ? authName.trim() : "",
+                        noteText != null ? noteText.trim() : ""
+                ));
             }
         }
 
-        // Read file1 and write matches
-        try (
-                Reader reader1 = new InputStreamReader(new FileInputStream(file1), StandardCharsets.UTF_8);
-                CSVParser parser1 = CSVFormat.DEFAULT
-                        .builder()
-                        .setHeader()
-                        .setSkipHeaderRecord(true)
-                        .build()
-                        .parse(reader1);
-
-                Writer writer = new OutputStreamWriter(new FileOutputStream(output), StandardCharsets.UTF_8);
-                CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT)
-        ) {
-            // write header
-            printer.printRecord(parser1.getHeaderNames());
-
-            for (CSVRecord record : parser1) {
-                String medicaidId = record.get(0);
-
-                if (medicaidId != null && medicaidSet.contains(medicaidId.trim())) {
-                    printer.printRecord(record);
-                }
-            }
-        }
-
-        System.out.println("Done!");
+        return list;
     }
+}
+
+
+public static List<String> readMedicaidList(String filePath) throws Exception {
+
+    List<String> list = new ArrayList<>();
+
+    try (
+            Reader reader = new InputStreamReader(new FileInputStream(filePath), StandardCharsets.UTF_8);
+            CSVParser parser = CSVFormat.DEFAULT
+                    .builder()
+                    .setHeader()
+                    .setSkipHeaderRecord(true)
+                    .build()
+                    .parse(reader)
+    ) {
+
+        for (CSVRecord record : parser) {
+            String medicaid = record.get(0);
+
+            if (medicaid != null && !medicaid.trim().isEmpty()) {
+                list.add(medicaid.trim());
+            }
+        }
+    }
+
+    return list;
+}
+
+
+public static void main(String[] args) throws Exception {
+
+    List<MedicaidRecord> records = readCsv("C:/input/excel1.csv");
+    List<String> medicaidList = readMedicaidList("C:/input/excel2.csv");
+
+    System.out.println("Excel1 records: " + records.size());
+    System.out.println("Excel2 records: " + medicaidList.size());
 }
