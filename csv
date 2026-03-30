@@ -1,0 +1,45 @@
+import java.io.*;
+import java.util.*;
+
+public class CsvMatcher {
+
+    public static void main(String[] args) throws Exception {
+
+        String file1 = "excel1.csv"; // 3 columns
+        String file2 = "excel2.csv"; // 1 column
+        String output = "output.csv";
+
+        Set<String> medicaidSet = new HashSet<>();
+
+        // read excel2
+        try (BufferedReader br = new BufferedReader(new FileReader(file2))) {
+            String line;
+            br.readLine(); // skip header
+
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split(",");
+                medicaidSet.add(parts[0].trim());
+            }
+        }
+
+        // match + write
+        try (BufferedReader br = new BufferedReader(new FileReader(file1));
+             BufferedWriter bw = new BufferedWriter(new FileWriter(output))) {
+
+            String line;
+            bw.write(br.readLine()); // header
+            bw.newLine();
+
+            while ((line = br.readLine()) != null) {
+                String[] parts = line.split(",");
+
+                if (medicaidSet.contains(parts[0].trim())) {
+                    bw.write(line);
+                    bw.newLine();
+                }
+            }
+        }
+
+        System.out.println("✅ Done!");
+    }
+}
