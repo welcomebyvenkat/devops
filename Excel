@@ -1,0 +1,91 @@
+import org.apache.poi.ss.usermodel.*;
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+
+import java.io.*;
+import java.util.HashSet;
+import java.util.Set;
+
+public class MedicaidMatcher {
+
+    public static void main(String[] args) throws Exception {
+        String excel1 = "C:/input/excel1.xlsx";
+        String excel2 = "C:/input/excel2.xlsx";
+        String output = "C:/output/matched.xlsx";
+
+        matchRecords(excel1, excel2, output);
+    }
+
+    public static void matchRecords(String file1, String file2, String outputFile) throws Exception {
+
+        Set<String> medicaidSet = new HashSet<>();
+
+        // 🔹 Step 1: Read Excel 2 (medicaid column)
+        try (Workbook wb2 = new XSSFWorkbook(new FileInputStream(file2))) {
+            Sheet sheet2 = wb2.getSheetAt(0);
+
+            for (int i = 1; i <= sheet2.getLastRowNum(); i++) {
+                Row row = sheet2.getRow(i);
+                if (row != null) {
+                    String medicaid = getString(row.getCell(0));
+                    if (medicaid != null && !medicaid.isEmpty()) {
+                        medicaidSet.add(medicaid.trim());
+                    }
+                }
+            }
+        }
+
+        // 🔹 Step 2: Read Excel 1 and write matches
+        try (Workbook wb1 = new XSSFWorkbook(new FileInputStream(file1));
+             Workbook outWb = new XSSFWorkbook()) {
+
+            Sheet sheet1 = wb1.getSheetAt(0);
+            Sheet outSheet = outWb.createSheet("Matched");
+
+            int outRowIndex = 0;
+
+            // copy header
+            Row header = sheet1.getRow(0);
+            Row outHeader = outSheet.createRow(outRowIndex++);
+            copyRow(header, outHeader);
+
+            // 🔹 Step 3: Match logic
+            for (int i = 1; i <= sheet1.getLastRowNum(); i++) {
+                Row row = sheet1.getRow(i);
+
+                if (row != null) {
+                    String medicaidId = getString(row.getCell(0));
+
+                    if (medicaidId != null && medicaidSet.contains(medicaidId.trim())) {
+                        Row outRow = outSheet.createRow(outRowIndex++);
+                        copyRow(row, outRow);
+                    }
+                }
+            }
+
+            // write output
+            try (FileOutputStream fos = new FileOutputStream(outputFile)) {
+                outWb.write(fos);
+            }
+        }
+
+        System.out.println("✅ Matching completed!");
+    }
+
+    // 🔹 Convert any cell to String safely
+    private static String getString(Cell cell) {
+        if (cell == null) return "";
+
+        DataFormatter formatter = new DataFormatter(); // IMPORTANT
+        return formatter.formatCellValue(cell);
+    }
+
+    // 🔹 Copy full row
+    private static void copyRow(Row source, Row target) {
+        for (int i = 0; i < source.getLastCellNum(); i++) {
+            Cell srcCell = source.getCell(i, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+            Cell tgtCell = target.createCell(i);
+
+            tgtCell.setCellValue(srcCell.toString());
+        }
+    }
+}
