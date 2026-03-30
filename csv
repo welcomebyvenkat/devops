@@ -1,45 +1,66 @@
+import org.apache.commons.csv.CSVFormat;
+import org.apache.commons.csv.CSVParser;
+import org.apache.commons.csv.CSVPrinter;
+import org.apache.commons.csv.CSVRecord;
+
 import java.io.*;
-import java.util.*;
+import java.nio.charset.StandardCharsets;
+import java.util.HashSet;
+import java.util.Set;
 
 public class CsvMatcher {
 
     public static void main(String[] args) throws Exception {
 
-        String file1 = "excel1.csv"; // 3 columns
-        String file2 = "excel2.csv"; // 1 column
-        String output = "output.csv";
+        String file1 = "C:/input/excel1.csv";
+        String file2 = "C:/input/excel2.csv";
+        String output = "C:/output/matched.csv";
 
         Set<String> medicaidSet = new HashSet<>();
 
-        // read excel2
-        try (BufferedReader br = new BufferedReader(new FileReader(file2))) {
-            String line;
-            br.readLine(); // skip header
-
-            while ((line = br.readLine()) != null) {
-                String[] parts = line.split(",");
-                medicaidSet.add(parts[0].trim());
-            }
-        }
-
-        // match + write
-        try (BufferedReader br = new BufferedReader(new FileReader(file1));
-             BufferedWriter bw = new BufferedWriter(new FileWriter(output))) {
-
-            String line;
-            bw.write(br.readLine()); // header
-            bw.newLine();
-
-            while ((line = br.readLine()) != null) {
-                String[] parts = line.split(",");
-
-                if (medicaidSet.contains(parts[0].trim())) {
-                    bw.write(line);
-                    bw.newLine();
+        // Read file2
+        try (
+                Reader reader2 = new InputStreamReader(new FileInputStream(file2), StandardCharsets.UTF_8);
+                CSVParser parser2 = CSVFormat.DEFAULT
+                        .builder()
+                        .setHeader()
+                        .setSkipHeaderRecord(true)
+                        .build()
+                        .parse(reader2)
+        ) {
+            for (CSVRecord record : parser2) {
+                String medicaid = record.get(0);
+                if (medicaid != null && !medicaid.trim().isEmpty()) {
+                    medicaidSet.add(medicaid.trim());
                 }
             }
         }
 
-        System.out.println("✅ Done!");
+        // Read file1 and write matches
+        try (
+                Reader reader1 = new InputStreamReader(new FileInputStream(file1), StandardCharsets.UTF_8);
+                CSVParser parser1 = CSVFormat.DEFAULT
+                        .builder()
+                        .setHeader()
+                        .setSkipHeaderRecord(true)
+                        .build()
+                        .parse(reader1);
+
+                Writer writer = new OutputStreamWriter(new FileOutputStream(output), StandardCharsets.UTF_8);
+                CSVPrinter printer = new CSVPrinter(writer, CSVFormat.DEFAULT)
+        ) {
+            // write header
+            printer.printRecord(parser1.getHeaderNames());
+
+            for (CSVRecord record : parser1) {
+                String medicaidId = record.get(0);
+
+                if (medicaidId != null && medicaidSet.contains(medicaidId.trim())) {
+                    printer.printRecord(record);
+                }
+            }
+        }
+
+        System.out.println("Done!");
     }
 }
